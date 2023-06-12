@@ -46,7 +46,7 @@ JSON_GLIB_VERSION:=1.0
 # To enable the extended Image Services, install either the FFmpeg or OpenCV 
 # development libraries (See /docs/installing-dependencies.md), and
 #  - set either BUILD_WITH_FFMPEG or BUILD_WITH_OPENCV:=true (NOT both)
-BUILD_WITH_FFMPEG:=false
+BUILD_WITH_FFMPEG:=true
 BUILD_WITH_OPENCV:=false
 
 # To enable the InterPipe Sink and Source components
@@ -148,28 +148,28 @@ CFLAGS+= -I$(INC_INSTALL_DIR) \
 	-DNVDS_AZURE_EDGE_PROTO_LIB='L"$(LIB_INSTALL_DIR)/libnvds_azure_edge_proto"' \
 	-DNVDS_KAFKA_PROTO_LIB='L"$(LIB_INSTALL_DIR)/libnvds_kafka_proto.so"' \
 	-DNVDS_REDIS_PROTO_LIB='L"$(LIB_INSTALL_DIR)/libnvds_redis_proto.so"' \
-    -fPIC 
+    -fPIC
 
 ifeq ($(BUILD_WITH_FFMPEG),true)
 CFLAGS+= -I./src/ffmpeg \
-	-I./test/avfile
+	-I./test/avfile 
 endif	
 
 ifeq ($(BUILD_WITH_OPENCV),true)
 CFLAGS+= -I./src/opencv \
-	-I./test/avfile
+	-I./test/avfile 
 endif	
 
 ifeq ($(shell test $(GSTREAMER_SUB_VERSION) -gt 16; echo $$?),0)
 CFLAGS+= -I/usr/include/libsoup-$(LIBSOUP_VERSION) \
 	-I/usr/include/json-glib-$(JSON_GLIB_VERSION) \
-	-I./src/webrtc
+	-I./src/webrtc 
 endif	
 
 ifeq ($(BUILD_NMP_PPH),true)
 CFLAGS+= -I./src/nmp \
 	-I$(NUM_CPP_PATH) \
-	-DNUMCPP_NO_USE_BOOST
+	-DNUMCPP_NO_USE_BOOST 
 endif	
 
 CFLAGS += `geos-config --cflags`	
@@ -197,7 +197,7 @@ LIBS+= -L$(LIB_INSTALL_DIR) \
 	-Lgstreamer-rtsp-server-$(GSTREAMER_VERSION) \
 	-lgstapp-1.0 \
 	-L/usr/local/cuda/lib64/ -lcudart \
-	-Wl,-rpath,$(LIB_INSTALL_DIR)
+	-Wl,-rpath,$(LIB_INSTALL_DIR) 
 
 ifeq ($(shell test $(GSTREAMER_SUB_VERSION) -gt 16; echo $$?),0)
 LIBS+= -Lgstreamer-sdp-$(GSTREAMER_SDP_VERSION) \
@@ -213,7 +213,8 @@ LIBS+= -lavformat \
 	-lswscale \
 	-lz \
 	-lpthread \
-	-lswresample
+	-lswresample \
+        -ldl
 endif
 
 PKGS:= gstreamer-$(GSTREAMER_VERSION) \
@@ -238,7 +239,7 @@ endif
 
 all: $(APP)
 
-debug: CFLAGS += -DDEBUG -g
+debug: CFLAGS += -DDEBUG -g -fPIC
 debug: $(APP)
 
 PCH_INC=./src/Dsl.h
