@@ -1,9 +1,11 @@
 # Install FFMPEG
+```
 git clone https://github.com/HoangTienDuc/FFmpeg.git
 cd FFmpeg
 ./configure --enable-nonfree --enable-pic --enable-shared
 make -j 
 make install
+```
 
 # Install DSL
 ```
