@@ -51,7 +51,7 @@ from dsl import *
 amcrest_rtsp_uri = 'rtsp://username:password@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0'    
 
 # RTSP Source URI for HIKVISION Camera    
-hikvision_rtsp_uri = 'rtsp://username:password@192.168.1.64:554/Streaming/Channels/101'    
+hikvision_rtsp_uri = 'rtsp://admin:123456Aa@kybernetwork123.cameraddns.net:1554/Streaming/Channels/501'    
 
 # Filespecs (Jetson and dGPU) for the Primary GIE
 primary_infer_config_file_jetson = \

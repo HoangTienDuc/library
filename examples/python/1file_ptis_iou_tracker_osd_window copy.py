@@ -49,7 +49,8 @@ import time
 from dsl import *
 
 
-hikvision_rtsp_uri = 'rtsp://admin:123456Aa@kybernetwork123.cameraddns.net:1554/Streaming/Channels/601'    
+# File path for the single File Source
+file_path = '/opt/nvidia/deepstream/deepstream/samples/streams/sample_qHD.mp4'
 
 # Filespecs for the Primary Triton Inference Server (PTIS)
 primary_infer_config_file = \
@@ -58,7 +59,6 @@ primary_infer_config_file = \
 # Filespec for the IOU Tracker config file
 iou_tracker_config_file = \
     '/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_IOU.yml'
-
 
 # Source file dimensions are 960 × 540 - use this to set the Streammux dimensions.
 source_width = 960
@@ -108,16 +108,10 @@ def main(args):
     # Since we're not using args, we can Let DSL initialize GST on first call
     while True:
 
-        # For each camera, create a new RTSP Source for the specific RTSP URI    
-        retval = dsl_source_rtsp_new('rtsp-source',     
-            uri = hikvision_rtsp_uri,     
-            protocol = DSL_RTP_ALL,     
-            skip_frames = 0,     
-            drop_frame_interval = 0,     
-            latency=100,
-            timeout=2)    
-        if (retval != DSL_RETURN_SUCCESS):    
-            return retval    
+        # New File Source using the file path specified above, repeat diabled.
+        retval = dsl_source_file_new('file-source', file_path, False)
+        if retval != DSL_RETURN_SUCCESS:
+            break
             
         # New Primary TIS using the filespec specified above, with interval = 0
         retval = dsl_infer_tis_primary_new('primary-tis', primary_infer_config_file, 0)

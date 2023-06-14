@@ -1,99 +1,74 @@
-################################################################################    
-# The MIT License    
-#    
-# Copyright (c) 2019-2023, Prominence AI, Inc.
-#    
-# Permission is hereby granted, free of charge, to any person obtaining a    
-# copy of this software and associated documentation files (the "Software"),    
-# to deal in the Software without restriction, including without limitation    
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,    
-# and/or sell copies of the Software, and to permit persons to whom the    
-# Software is furnished to do so, subject to the following conditions:    
-#    
-# The above copyright notice and this permission notice shall be included in    
-# all copies or substantial portions of the Software.    
-#    
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR    
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,    
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL    
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER    
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING    
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER    
-# DEALINGS IN THE SOFTWARE.    
-################################################################################    
-
-#!/usr/bin/env python    
-
-import sys    
-import time    
-from dsl import *    
-
-# RTSP Source URI for AMCREST Camera    
-amcrest_rtsp_uri = 'rtsp://username:password@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0'    
+import sys
+from dsl import *
 
 # RTSP Source URI for HIKVISION Camera    
-hikvision_rtsp_uri = 'rtsp://username:password@192.168.1.64:554/Streaming/Channels/101'    
+hikvision_rtsp_uri = 'rtsp://admin:123456Aa@kybernetwork123.cameraddns.net:1554/Streaming/Channels/601'    
 
-WINDOW_WIDTH = DSL_STREAMMUX_DEFAULT_WIDTH    
-WINDOW_HEIGHT = DSL_STREAMMUX_DEFAULT_HEIGHT    
+primary_infer_config_file_dgpu = '/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_infer_primary.txt'
+primary_model_engine_file_dgpu = '/opt/nvidia/deepstream/deepstream/samples/trtis_model_repo/Primary_Detector/1/resnet10.caffemodel_b30_gpu0_int8.engine'
 
-##     
-# Function to be called on XWindow KeyRelease event    
-##     
-def xwindow_key_event_handler(key_string, client_data):    
-    print('key released = ', key_string)    
-    if key_string.upper() == 'P':    
-        dsl_player_pause('rtsp-player')    
-    elif key_string.upper() == 'R':    
-        dsl_player_play('rtsp-player')    
-    elif key_string.upper() == 'Q' or key_string == '' or key_string == '':    
-        dsl_player_stop('rtsp-player')
-        dsl_main_loop_quit()
-       
-def main(args):    
+# Filespec for the IOU Tracker config file
+iou_tracker_config_file = '/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_IOU.yml'
 
-    # Since we're not using args, we can Let DSL initialize GST on first call    
-    while True:    
+TILER_WIDTH = DSL_STREAMMUX_DEFAULT_WIDTH
+TILER_HEIGHT = DSL_STREAMMUX_DEFAULT_HEIGHT
+WINDOW_WIDTH = TILER_WIDTH
+WINDOW_HEIGHT = TILER_HEIGHT
 
-        # For each camera, create a new RTSP Source for the specific RTSP URI    
-        retval = dsl_source_rtsp_new('rtsp-source',     
-            uri = hikvision_rtsp_uri,     
-            protocol = DSL_RTP_ALL,     
-            skip_frames = 0,     
-            drop_frame_interval = 0,     
-            latency=100,
-            timeout=2)    
-        if (retval != DSL_RETURN_SUCCESS):    
-            return retval    
 
-        # New Overlay Sink, 0 x/y offsets and same dimensions as Tiled Display    
-        retval = dsl_sink_window_new('window-sink', 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)    
-        if retval != DSL_RETURN_SUCCESS:    
-            break    
+def create_components():
+    retval = dsl_source_rtsp_new('rtsp-source',     
+        uri=hikvision_rtsp_uri,     
+        protocol=DSL_RTP_ALL,     
+        skip_frames=0,     
+        drop_frame_interval=0,     
+        latency=100,
+        timeout=2)    
+    if retval != DSL_RETURN_SUCCESS:    
+        return retval    
 
-        retval = dsl_player_new('rtsp-player', 'rtsp-source', 'window-sink')
-        if retval != DSL_RETURN_SUCCESS:    
-            break
-            
-        # Add the XWindow event handler functions defined above    
-        retval = dsl_player_xwindow_key_event_handler_add("rtsp-player", xwindow_key_event_handler, None)    
-        if retval != DSL_RETURN_SUCCESS:    
-            break    
+    retval = dsl_infer_gie_primary_new('primary-gie', 
+        primary_infer_config_file_dgpu, primary_model_engine_file_dgpu, 4)
+    if retval != DSL_RETURN_SUCCESS:
+        print("[ERROR] Cannot create primary-gie")
+
+    retval = dsl_tracker_new('iou-tracker', iou_tracker_config_file, 480, 272)
+    if retval != DSL_RETURN_SUCCESS:
+        print("[ERROR] Cannot create iou-tracker")
+
+    retval = dsl_tiler_new('tiler', TILER_WIDTH, TILER_HEIGHT)
+    if retval != DSL_RETURN_SUCCESS:
+        print("[ERROR] Cannot create tiler")
         
-        # Play the player    
-        retval = dsl_player_play('rtsp-player')    
-        if retval != DSL_RETURN_SUCCESS:    
-            break    
+    retval = dsl_osd_new('on-screen-display', 
+        text_enabled=True, clock_enabled=True, bbox_enabled=True, mask_enabled=False)
+    if retval != DSL_RETURN_SUCCESS:
+        print("[ERROR] Cannot create on-screen-display")
+        
+    retval = dsl_sink_window_new('window-sink', 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
+    if retval != DSL_RETURN_SUCCESS:
+        print("[ERROR] Cannot create window-sink")
 
-        dsl_main_loop_run()    
-        retval = DSL_RETURN_SUCCESS    
-        break    
+    retval = dsl_sink_rtsp_new('rtsp-sink', 
+        host='0.0.0.0', udp_port=5400, rtsp_port=8554, codec=DSL_CODEC_H265, bitrate=200000, interval=0)
+    if (retval != DSL_RETURN_SUCCESS):
+        print("[ERROR] Cannot create rtsp-sink")
 
-    # Print out the final result
-    print(dsl_return_value_to_string(retval))
+    
+    # Create a Pipeline and add the new components.
+    retval = dsl_pipeline_new_component_add_many('pipeline', 
+        ['rtsp-source', 'primary-gie', 'iou-tracker', 'tiler', 
+        'on-screen-display', 'window-sink', 'rtsp-sink', None])
+    if retval != DSL_RETURN_SUCCESS:
+        print("[ERROR] Cannot create primary-gie")
 
-    # Cleanup all DSL/GST resources
-    dsl_delete_all()
-
+def main():
+    create_components()
+    retval = dsl_pipeline_play('pipeline')
+    if retval != DSL_RETURN_SUCCESS:
+        print("[ERROR] Cannot play the pipeline")
+    dsl_main_loop_run()
+    retval = DSL_RETURN_SUCCESS
+    
 if __name__ == '__main__':
-    sys.exit(main(sys.argv))
+    sys.exit(main())

@@ -1,7 +1,7 @@
 ################################################################################
 # The MIT License
 #
-# Copyright (c) 2023, Prominence AI, Inc.
+# Copyright (c) 2019-2023, Prominence AI, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -23,18 +23,20 @@
 ################################################################################
 
 # ````````````````````````````````````````````````````````````````````````````````````
-# This example demonstrates the use of a Smart-Record Tap and how
-# to start a recording session on user/viewer demand - in this case
-# by pressing the 'S' key.  The xwindow_key_event_handler calls
-# dsl_tap_record_session_start with:
+# This example demonstrates the use of a Smart-Record Sink and how to start
+# a recording session on the "occurrence" of an Object Detection Event (ODE).
+# An ODE Occurrence Trigger, with a limit of 1 event, is used to trigger
+# on the first detection of a Person object. The Trigger uses an ODE "Start 
+# Recording Session Action" setup with the following parameters:
 #   start-time: the seconds before the current time (i.e.the amount of 
 #               cache/history to include.
 #   duration:   the seconds after the current time (i.e. the amount of 
 #               time to record after session start is called).
 # Therefore, a total of start-time + duration seconds of data will be recorded.
 #
-# Record Tap components tap into RTSP Source components pre-decoder to enable
-# smart-recording of the incomming (original) H.264 or H.265 stream. 
+# Additional ODE Actions are added to the Trigger to 1) to print the ODE 
+# data (source-id, batch-id, object-id, frame-number, object-dimensions, etc.)
+# to the console and 2) to capture the object (bounding-box) to a JPEG file.
 # 
 # A basic inference Pipeline is used with PGIE, Tracker, OSD, and Window Sink.
 #
@@ -44,6 +46,10 @@
 # to each frame while the Trigger is enabled. The record_event_listener callback,
 # called on both DSL_RECORDING_EVENT_START and DSL_RECORDING_EVENT_END, enables
 # and disables the "Always Trigger" according to the event received. 
+#
+# IMPORTANT: the record_event_listener is used to reset the one-shot Occurrence-
+# Trigger when called with DSL_RECORDING_EVENT_END. This allows a new recording
+# session to be started on the next occurrence of a Person. 
 
 #!/usr/bin/env python
 
@@ -54,17 +60,17 @@ from dsl import *
 amcrest_rtsp_uri = 'rtsp://username:password@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0'    
 
 # RTSP Source URI for HIKVISION Camera    
-hikvision_rtsp_uri = 'rtsp://admin:123456Aa@kybernetwork123.cameraddns.net:1554/Streaming/Channels/501'    
+hikvision_rtsp_uri = 'rtsp://admin:123456Aa@kybernetwork123.cameraddns.net:1554/Streaming/Channels/601'    
 
 # Filespecs (Jetson and dGPU) for the Primary GIE
 primary_infer_config_file_jetson = \
     '/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_infer_primary.txt'
 primary_model_engine_file_jetson = \
-    '/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/resnet10.caffemodel_b8_gpu0_fp16.engine'
+    '/opt/nvidia/deepstream/deepstream/samples/trtis_model_repo/Primary_Detector/1/resnet10.caffemodel_b30_gpu0_int8.engine'
 primary_infer_config_file_dgpu = \
     '/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_infer_primary.txt'
 primary_model_engine_file_dgpu = \
-    '/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/resnet10.caffemodel_b8_gpu0_int8.engine'
+    '/opt/nvidia/deepstream/deepstream/samples/trtis_model_repo/Primary_Detector/1/resnet10.caffemodel_b30_gpu0_int8.engine'
 
 # Filespec for the IOU Tracker config file
 iou_tracker_config_file = \
@@ -85,9 +91,6 @@ WINDOW_HEIGHT = TILER_HEIGHT
 ## 
 def xwindow_key_event_handler(key_string, client_data):
     print('key released = ', key_string)
-    if key_string.upper() == 'S':
-        retval = dsl_tap_record_session_start(
-            'record-tap', 20, 20, None)
     if key_string.upper() == 'P':
         dsl_pipeline_pause('pipeline')
     elif key_string.upper() == 'R':
@@ -121,9 +124,9 @@ def state_change_listener(old_state, new_state, client_data):
         dsl_pipeline_dump_to_dot('pipeline', "state-playing")
 
 ## 
-# Function to be called on recording complete
+# Callback function to handle recording session start and stop events
 ## 
-def record_event_listener(session_info_ptr, client_data):
+def record_complete_listener(session_info_ptr, client_data):
     print(' ***  Recording Event  *** ')
     
     session_info = session_info_ptr.contents
@@ -156,13 +159,23 @@ def record_event_listener(session_info_ptr, client_data):
             print('Enable always trigger failed with error: ', 
                 dsl_return_value_to_string(retval))
 
+        # re-enable the one-shot trigger for the next "New Instance" of a person
+        retval = dsl_ode_trigger_reset('person-occurrence-trigger')    
+        if (retval != DSL_RETURN_SUCCESS):
+            print('Failed to reset instance trigger with error:', 
+                dsl_return_value_to_string(retval))
+
 def main(args):
 
     # Since we're not using args, we can Let DSL initialize GST on first call
     while True:
 
         # ````````````````````````````````````````````````````````````````````````````
-        # Create new RGBA color types for our Display Text and Circle   
+        # Create new RGBA color types for our Display Text and Circle
+        retval = dsl_display_type_rgba_color_custom_new('opaque-red', 
+            red=1.0, blue=0.5, green=0.5, alpha=0.7)
+        if retval != DSL_RETURN_SUCCESS:
+            break
         retval = dsl_display_type_rgba_color_custom_new('full-red', 
             red=1.0, blue=0.0, green=0.0, alpha=1.0)
         if retval != DSL_RETURN_SUCCESS:
@@ -179,30 +192,30 @@ def main(args):
             font='impact', size=20, color='full-white')
         if retval != DSL_RETURN_SUCCESS:
             break
-            
+
         # ````````````````````````````````````````````````````````````````````````````
-        # Create a new Text type object that will be used to show 
-        # the recording in progress
-        retval = dsl_display_type_rgba_text_new('rec-text', 
-            'REC    ', x_offset=10, y_offset=30, font='impact-20-white', 
-            has_bg_color=True, bg_color='opaque-black')
+
+        # Create a new Text type object that will be used to show the recording 
+        # in progress
+        retval = dsl_display_type_rgba_text_new('rec-text', 'REC', 
+            x_offset=10, y_offset=30, font='impact-20-white', 
+                has_bg_color=True, bg_color='opaque-black')
         if retval != DSL_RETURN_SUCCESS:
             break
-        # A new RGBA Circle to be used to simulate a red LED light 
-        # for the recording in progress.
+        # A new RGBA Circle to be used to simulate a red LED light for the recording 
+        # in progress.
         retval = dsl_display_type_rgba_circle_new('red-led', 
-        x_center=94, y_center=52, radius=8, 
+            x_center=94, y_center=52, radius=8, 
             color='full-red', has_bg_color=True, bg_color='full-red')
         if retval != DSL_RETURN_SUCCESS:
             break
             
         # Create a new Action to display the "recording in-progress" text
-        retval = dsl_ode_action_display_meta_add_many_new('add-rec-on',
+        retval = dsl_ode_action_display_meta_add_many_new('add-rec-on', 
             display_types=['rec-text', 'red-led', None])
         if retval != DSL_RETURN_SUCCESS:
             break
             
-        # ````````````````````````````````````````````````````````````````````````````
         # Create an Always Trigger that will trigger on every frame when enabled.
         # We use this trigger to display meta data while the recording is in session.
         # POST_OCCURRENCE_CHECK == after all other triggers are processed first.
@@ -219,8 +232,92 @@ def main(args):
         retval = dsl_ode_trigger_enabled_set('rec-on-trigger', enabled=False)    
         if (retval != DSL_RETURN_SUCCESS):    
             return retval
-    
+
+        # Create a new Capture Action to capture the full-frame to jpeg image, and 
+        # saved to file. The action will be triggered on firt occurrence of a person
+        # and will be saved to the current dir.
+        retval = dsl_ode_action_capture_object_new('person-capture-action', 
+            outdir="./")
+        if retval != DSL_RETURN_SUCCESS:
+            break
+        
+        # We will also print the event occurrence to the console 
+        retval = dsl_ode_action_print_new('print', force_flush=False)
+        if retval != DSL_RETURN_SUCCESS:
+            break
+
+        ##############################################################################
+        
+        # New Record-Sink that will buffer encoded video while waiting for the 
+        # ODE trigger/action, defined below, to start a new session on first 
+        # occurrence of a person. The default 'cache-size' and 'duration' are defined in
+        # DslApi.h Setting the bit rate to 0 to not change from the default.  
+        retval = dsl_sink_record_new('record-sink', outdir="./", codec=DSL_CODEC_H265, 
+            container=DSL_CONTAINER_MKV, bitrate=0, interval=0, 
+            client_listener=record_complete_listener)
+        if retval != DSL_RETURN_SUCCESS:
+            break
+
+        # IMPORTANT: Best to set the default cache-size to the maximum value we 
+        # intend to use (see the xwindow_key_event_handler callback above). 
+        retval = dsl_sink_record_cache_size_set('record-sink', 25)
+        if retval != DSL_RETURN_SUCCESS:
+            break
+
+        # Since the Record-Sink is derived from the Encode-Sink, we can use the 
+        # dsl_sink_encode_dimensions_set service to change the recording dimensions 
+        # at the input to the encoder. Note: the dimensions can also be controlled
+        # after the video encoder by calling dsl_sink_record_dimensions_set
+        retval = dsl_sink_encode_dimensions_set('record-sink', 640, 360)
+        if retval != DSL_RETURN_SUCCESS:
+            break
+
+        ##############################################################################
+
+        # Create a new Start Action to start a new record session.
+        # IMPORTANT! The Record Sink (see above) must be created first or
+        # this call will fail with DSL_RESULT_COMPONENT_NAME_NOT_FOUND. 
+        retval = dsl_ode_action_sink_record_start_new('start-record-action', 
+            record_sink='record-sink', start=20, duration=20, client_data=None)
+        if retval != DSL_RETURN_SUCCESS:
+            break
+
         # ````````````````````````````````````````````````````````````````````````````
+        
+        # Next, create the Person Occurrence Trigger with a limit of 1. We will reset 
+        # the trigger in the recording complete callback.
+        retval = dsl_ode_trigger_occurrence_new('person-occurrence-trigger', 
+            source=DSL_ODE_ANY_SOURCE, class_id=PGIE_CLASS_ID_PERSON, limit=1)
+        if retval != DSL_RETURN_SUCCESS:
+            break
+
+        # set the "infer-done-only" criteria so we can capture the confidence level
+        retval = dsl_ode_trigger_infer_done_only_set('person-occurrence-trigger', True)
+        if retval != DSL_RETURN_SUCCESS:
+            break
+            
+        # Add the actions to our Person Occurence Trigger.
+        retval = dsl_ode_trigger_action_add_many('person-occurrence-trigger', actions=[
+            'person-capture-action', 
+            'print',
+            'start-record-action',
+            None])
+        if retval != DSL_RETURN_SUCCESS:
+            break
+            
+        # ````````````````````````````````````````````````````````````````````````````
+        # New ODE Handler for our Triggers
+        retval = dsl_pph_ode_new('ode-handler')
+        if retval != DSL_RETURN_SUCCESS:
+            break
+        retval = dsl_pph_ode_trigger_add_many('ode-handler', triggers=[
+            'person-occurrence-trigger',
+            'rec-on-trigger',
+            None])
+        if retval != DSL_RETURN_SUCCESS:
+            break
+
+        ##############################################################################
 
         # Create the remaining Pipeline components
         
@@ -232,20 +329,6 @@ def main(args):
             drop_frame_interval = 0,     
             latency=100,
             timeout=2)    
-        if (retval != DSL_RETURN_SUCCESS):    
-            return retval    
-
-        # New record tap created with the record_event_listener callback function 
-        # defined above - will be called on session-start and session-end
-        retval = dsl_tap_record_new('record-tap',     
-            outdir = './',     
-            container = DSL_CONTAINER_MP4,     
-            client_listener = record_event_listener)    
-        if (retval != DSL_RETURN_SUCCESS):    
-            return retval    
-
-        # Add the new Tap to the Source directly    
-        retval = dsl_source_rtsp_tap_add('rtsp-source', 'record-tap')    
         if (retval != DSL_RETURN_SUCCESS):    
             return retval    
 
@@ -264,53 +347,44 @@ def main(args):
         if retval != DSL_RETURN_SUCCESS:
             break
 
-        # New OSD with text, clock and bbox display all enabled. 
-        retval = dsl_osd_new('on-screen-display', 
-            text_enabled=True, clock_enabled=True, 
-            bbox_enabled=True, mask_enabled=False)
-        if retval != DSL_RETURN_SUCCESS:
-            break
-
-        # New ODE Handler for our Trigger
-        retval = dsl_pph_ode_new('ode-handler')
-        if retval != DSL_RETURN_SUCCESS:
-            break
-        retval = dsl_pph_ode_trigger_add('ode-handler', 'rec-on-trigger')
-        if retval != DSL_RETURN_SUCCESS:
-            break
-
-        # add our ODE Pad Probe Handle to the Sink Pad of the Tiler
-        retval = dsl_osd_pph_add('on-screen-display', 'ode-handler', DSL_PAD_SINK)
+        # New Tiled Display, setting width and height, use default cols/rows set by source count
+        retval = dsl_tiler_new('tiler', TILER_WIDTH, TILER_HEIGHT)
         if retval != DSL_RETURN_SUCCESS:
             break
  
-        # New Window Sink, 0 x/y offsets and same dimensions as Tiled Display
-        retval = dsl_sink_window_new('window-sink', 
-            0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
+        # add our ODE Pad Probe Handle to the Sink Pad of the Tiler
+        retval = dsl_tiler_pph_add('tiler', 'ode-handler', DSL_PAD_SINK)
+        if retval != DSL_RETURN_SUCCESS:
+            break
+ 
+        # New OSD with text, clock and bbox display all enabled. 
+        retval = dsl_osd_new('on-screen-display', 
+            text_enabled=True, clock_enabled=True, bbox_enabled=True, mask_enabled=False)
         if retval != DSL_RETURN_SUCCESS:
             break
 
-        # Add all the components to our pipeline - except for our second 
-        # source and overlay sink 
+        # New Window Sink, 0 x/y offsets and same dimensions as Tiled Display
+        retval = dsl_sink_window_new('window-sink', 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
+        if retval != DSL_RETURN_SUCCESS:
+            break
+
+        # Add all the components to our pipeline - except for our second source and overlay sink 
         retval = dsl_pipeline_new_component_add_many('pipeline', 
-            ['rtsp-source', 'primary-gie', 'iou-tracker', 
-            'on-screen-display', 'window-sink', None])
+            ['rtsp-source', 'primary-gie', 'iou-tracker', 'tiler', 
+            'on-screen-display', 'window-sink', 'record-sink', None])
         if retval != DSL_RETURN_SUCCESS:
             break
             
         # Add the XWindow event handler functions defined above
-        retval = dsl_pipeline_xwindow_key_event_handler_add("pipeline", 
-            xwindow_key_event_handler, None)
+        retval = dsl_pipeline_xwindow_key_event_handler_add("pipeline", xwindow_key_event_handler, None)
         if retval != DSL_RETURN_SUCCESS:
             break
-        retval = dsl_pipeline_xwindow_delete_event_handler_add("pipeline", 
-            xwindow_delete_event_handler, None)
+        retval = dsl_pipeline_xwindow_delete_event_handler_add("pipeline", xwindow_delete_event_handler, None)
         if retval != DSL_RETURN_SUCCESS:
             break
 
         ## Add the listener callback functions defined above
-        retval = dsl_pipeline_state_change_listener_add('pipeline', 
-            state_change_listener, None)
+        retval = dsl_pipeline_state_change_listener_add('pipeline', state_change_listener, None)
         if retval != DSL_RETURN_SUCCESS:
             break
         retval = dsl_pipeline_eos_listener_add('pipeline', eos_event_listener, None)

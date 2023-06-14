@@ -56,7 +56,7 @@ std::wstring amcrest_rtsp_uri =
 
 // RTSP Source URI for HIKVISION Camera    
 std::wstring hikvision_rtsp_uri = 
-    L"rtsp://username:password@192.168.1.64:554/Streaming/Channels/101";
+    L"rtsp://admin:123456Aa@kybernetwork123.cameraddns.net:1554/Streaming/Channels/501";
 
 // Config and model-engine files - Jetson and dGPU
 std::wstring primary_infer_config_file_jetson(

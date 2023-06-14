@@ -115,7 +115,7 @@ def main(args):
             break
 
         # Add the two file sinks as branches to the demuxer
-        retVal = dsl_tee_branch_add_many('demuxer', ['file-sink-1', 'file-sink-2', None])
+        retval = dsl_tee_branch_add_many('demuxer', ['file-sink-1', 'file-sink-2', None])
         if retval != DSL_RETURN_SUCCESS:
             break
 
@@ -125,7 +125,7 @@ def main(args):
             break
 
         # Add Branch1 and the demuxer (as branch2) to the splitter
-        retVal = dsl_tee_branch_add_many('splitter', ['branch1', 'demuxer', None])
+        retval = dsl_tee_branch_add_many('splitter', ['branch1', 'demuxer', None])
         if retval != DSL_RETURN_SUCCESS:
             break
 
